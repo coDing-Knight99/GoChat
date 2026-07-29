@@ -2,45 +2,78 @@ package auth
 
 import (
 	"errors"
+	"os"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 )
 
-var jwtSecret = []byte("Go-Chat")
+var accessTokenSecret = []byte(os.Getenv("AccessTokenSecret"))
+var refreshTokenSecret = []byte(os.Getenv("refreshTokenSecret"))
 
 type Claims struct {
 	UserID string `json:"userId"`
 	jwt.RegisteredClaims
 }
 
-func GenerateToken	(userID string) (string,error){
-	expirationTime := time.Now().Add(24*time.Hour)
-	claims := &Claims{
-		UserID: userID,
-		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(expirationTime),
-			IssuedAt: jwt.NewNumericDate(time.Now()),
-		},
-	}
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256,claims)
-	return token.SignedString(jwtSecret)
+type Tokens struct {
+	AccessToken  string `json:"accessToken"`
+	RefreshToken string `json:"refreshToken"`
 }
 
-func ValidateToken(tokenStr string) (string,error) {
-	claims := &Claims{}
-	token,err := jwt.ParseWithClaims(tokenStr,claims,func(token *jwt.Token) (interface{},error){
-		if _,ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil,errors.New("unexpected signing method")
-		}
-		return jwtSecret,nil
-	})
-	if err!=nil {
-		return "",err
+func GenerateTokens(userID string) (*Tokens, error) {
+	now := time.Now()
+
+	accessClaims := &Claims{
+		UserID: userID,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(now.Add(15 * time.Minute)),
+			IssuedAt:  jwt.NewNumericDate(now),
+		},
+	}
+	accessToken := jwt.NewWithClaims(jwt.SigningMethodHS256, accessClaims)
+	accessSigned, err := accessToken.SignedString(accessTokenSecret)
+	if err != nil {
+		return nil, err
 	}
 
-	if !token.Valid {
-		return "",errors.New("invalid token")
+	refreshClaims := &Claims{
+		UserID: userID,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(now.Add(7 * 24 * time.Hour)),
+			IssuedAt:  jwt.NewNumericDate(now),
+		},
 	}
-	return claims.UserID,nil
+	refreshToken := jwt.NewWithClaims(jwt.SigningMethodHS256, refreshClaims)
+	refreshSigned, err := refreshToken.SignedString(refreshTokenSecret)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Tokens{
+		AccessToken:  accessSigned,
+		RefreshToken: refreshSigned,
+	}, nil
+}
+
+func parseToken(tokenStr string, secret []byte) (string, error) {
+	claims := &Claims{}
+	token, err := jwt.ParseWithClaims(tokenStr, claims, func(t *jwt.Token) (interface{}, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, errors.New("unexpected signing method")
+		}
+		return secret, nil
+	})
+	if err != nil || !token.Valid {
+		return "", errors.New("invalid or expired Token")
+	}
+	return claims.UserID, nil
+}
+
+func ValidateAccessToken(tokenStr string) (string, error) {
+	return parseToken(tokenStr, accessTokenSecret)
+}
+
+func ValidateRefreshToken(tokenStr string) (string, error) {
+	return parseToken(tokenStr, refreshTokenSecret)
 }

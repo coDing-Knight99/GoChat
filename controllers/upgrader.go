@@ -4,28 +4,34 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/coDing-Knight99/GoChat/middleware"
 	"github.com/coDing-Knight99/GoChat/models"
 
 	"github.com/gorilla/websocket"
 )
 
 var upgrader = websocket.Upgrader{
-	ReadBufferSize: 1024,
+	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
-	CheckOrigin: func(r *http.Request) bool{
+	CheckOrigin: func(r *http.Request) bool {
 		return true
 	},
 }
 
 func HandleWebSocket(hub *models.Hub, w http.ResponseWriter, r *http.Request) {
-	conn, err := upgrader.Upgrade(w,r,nil)
-	if err != nil {
-		log.Println("Upgrade Error: ",err)
+	userID := r.Context().Value(middleware.UserIDKey).(string)
+	if userID == "" {
+		log.Println("Unauthorized UserId missing in Context")
+		http.Error(w, "User not authenticated", http.StatusUnauthorized)
 		return
 	}
-	userID := r.URL.Query().Get("userID")
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Println("Upgrade Error: ", err)
+		return
+	}
 
-	var client *models.Client= &models.Client{
+	client := &models.Client{
 		UserID: userID,
 		Conn:   conn,
 		Send:   make(chan models.Message, 256),

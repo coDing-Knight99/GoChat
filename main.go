@@ -7,6 +7,7 @@ import (
 
 	"github.com/coDing-Knight99/GoChat/controllers"
 	"github.com/coDing-Knight99/GoChat/db"
+	"github.com/coDing-Knight99/GoChat/middleware"
 	"github.com/coDing-Knight99/GoChat/models"
 	"github.com/coDing-Knight99/GoChat/workers"
 	"github.com/joho/godotenv"
@@ -23,15 +24,24 @@ func main() {
 		return
 	}
 	collection := client.Database("test").Collection("Message")
+	userCollection := client.Database("test").Collection("Users")
 	var rdb *redis.Client
 	rdb = db.ConnectRedis()
 	h := models.NewHub(rdb)
 	go h.StartHub()
 	w := workers.NewDBWorker(rdb, collection)
 	go w.Start()
-	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/ws", middleware.VerifyToken(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		log.Println("websocket request")
 		controllers.HandleWebSocket(h, w, r)
+	})))
+	http.HandleFunc("/register", func(w http.ResponseWriter, r *http.Request) {
+		log.Println("Register User")
+		controllers.RegisterUser(userCollection, w, r)
+	})
+	http.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
+		log.Println("Login User")
+		controllers.Login(userCollection, w, r)
 	})
 	err := http.ListenAndServe(os.Getenv("PORT"), nil)
 	if err != nil {
