@@ -31,19 +31,24 @@ func main() {
 	go h.StartHub()
 	w := workers.NewDBWorker(rdb, collection)
 	go w.Start()
-	http.HandleFunc("/ws", middleware.VerifyToken(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ws", middleware.VerifyToken(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		log.Println("websocket request")
 		controllers.HandleWebSocket(h, w, r)
 	})))
-	http.HandleFunc("/register", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/register", func(w http.ResponseWriter, r *http.Request) {
 		log.Println("Register User")
 		controllers.RegisterUser(userCollection, w, r)
 	})
-	http.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
 		log.Println("Login User")
 		controllers.Login(userCollection, w, r)
 	})
-	err := http.ListenAndServe(os.Getenv("PORT"), nil)
+	mux.HandleFunc("/checkavailable",func (w http.ResponseWriter,r *http.Request){
+		log.Println("Username  availability check")
+		controllers.CheckUsernameAvailability(userCollection, w, r)
+	})
+	err := http.ListenAndServe(os.Getenv("PORT"), middleware.EnableCORS(mux))
 	if err != nil {
 		log.Fatal("ListenAndServeError:", err)
 	}

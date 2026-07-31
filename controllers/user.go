@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"os"
@@ -14,19 +15,24 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-
-
 func RegisterUser(userCollection *mongo.Collection, w http.ResponseWriter, r *http.Request) {
 	var user models.User
+	w.Header().Set("Content-Type", "application/json")
 	err := json.NewDecoder(r.Body).Decode(&user)
 	if err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "Bad Request",
+		})
 		return
 	}
 	var alreadyTaken models.User
 	er1 := userCollection.FindOne(context.Background(), bson.M{"userID": user.UserID}).Decode(&alreadyTaken)
 	if er1 == nil {
-		http.Error(w, "Username is already taken", http.StatusConflict)
+		w.WriteHeader(http.StatusConflict)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "Username is already taken",
+		})
 		return
 	}
 	hash, err := bcrypt.GenerateFromPassword(
@@ -36,17 +42,22 @@ func RegisterUser(userCollection *mongo.Collection, w http.ResponseWriter, r *ht
 
 	if err != nil {
 		log.Println("Error hashing password")
-		http.Error(w, "Error Hashing Password", http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "Internal Server Error",
+		})
 		return
 	}
 	user.Password = string(hash)
 	_, er := userCollection.InsertOne(context.Background(), user)
 	if er != nil {
-		http.Error(w, "Error registering User", http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "Internal Server Error",
+		})
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]string{
 		"message": "User registered successfully",
@@ -61,20 +72,30 @@ type loginCreds struct {
 func Login(userCollection *mongo.Collection, w http.ResponseWriter, r *http.Request) {
 	logCred := &loginCreds{}
 	err := json.NewDecoder(r.Body).Decode(logCred)
+	w.Header().Set("Content-Type", "application/json")
 	if err != nil {
 		log.Println("Invalid Request Body")
-		http.Error(w, "Invalid Request Body", http.StatusBadRequest)
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "Bad Request",
+		})
 		return
 	}
 	var user models.User
 	err = userCollection.FindOne(context.Background(), bson.M{"userID": logCred.UserID}).Decode(&user)
 	if err == mongo.ErrNoDocuments {
-		http.Error(w, "User not found", http.StatusNotFound)
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "User Not Found",
+		})
 		return
 	}
 	if err != nil {
 		log.Println(err)
-		http.Error(w, "Database error", http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "Internal Server Error",
+		})
 		return
 	}
 	er := bcrypt.CompareHashAndPassword(
@@ -84,7 +105,10 @@ func Login(userCollection *mongo.Collection, w http.ResponseWriter, r *http.Requ
 
 	if er != nil {
 		log.Println("Incorrect Password")
-		http.Error(w, "Incorrect Password", http.StatusForbidden)
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "Incorrect Password",
+		})
 		return
 	}
 
@@ -92,7 +116,10 @@ func Login(userCollection *mongo.Collection, w http.ResponseWriter, r *http.Requ
 	tokens, err = auth.GenerateTokens(logCred.UserID)
 	if err != nil {
 		log.Println("Error Generating Tokens")
-		http.Error(w, "Error generating Tokens", http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "Internal Server Error",
+		})
 		return
 	}
 
@@ -121,8 +148,51 @@ func Login(userCollection *mongo.Collection, w http.ResponseWriter, r *http.Requ
 		MaxAge:   60 * 60 * 24,
 	})
 	log.Println("Login Successful")
-	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
 		"message": "Login Successful",
+	})
+}
+
+type queryusername struct {
+	Username string `json:"username"`
+}
+
+func CheckUsernameAvailability(userCollection *mongo.Collection, w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	var qusername queryusername
+	er := json.NewDecoder(r.Body).Decode(&qusername)
+	log.Println("Json", qusername)
+	if er != nil {
+		log.Println("Invalid Json", qusername.Username)
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "Bad Request",
+		})
+		return
+	}
+
+	err := userCollection.FindOne(r.Context(), bson.M{"userID": qusername.Username}).Err()
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		log.Println("Username available")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{
+			"available": "true",
+		})
+		return
+	}
+
+	if err != nil {
+		log.Println("Database Error")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "Internal Server Error",
+		})
+		return
+	}
+
+	log.Println("Username not available")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"available": "false",
 	})
 }
