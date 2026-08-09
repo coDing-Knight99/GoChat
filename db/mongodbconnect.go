@@ -11,18 +11,37 @@ import (
 )
 
 func ConnectDB() *mongo.Client {
+	mongoURI := os.Getenv("MONGODB_URI")
+	if mongoURI == "" {
+		log.Println("Error: MONGODB_URI environment variable is not set")
+		return nil
+	}
+
+	// Set timeouts directly in client options so background connection attempts fail fast if unreachable
+	clientOpts := options.Client().
+		ApplyURI(mongoURI).
+		SetServerSelectionTimeout(20 * time.Second). // Timeout finding MongoDB server
+		SetConnectTimeout(20 * time.Second)          // Timeout establishing TCP socket
+
+	client, err := mongo.Connect(clientOpts)
+	if err != nil {
+		log.Println("Failed to create MongoDB client:", err)
+		return nil
+	}
+
+	// Create context for Ping
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	client, err := mongo.Connect(options.Client().ApplyURI(os.Getenv("MONGODB_URI")))
-	if err != nil {
-		log.Println(err)
+
+	// Verify connection
+	if err := client.Ping(ctx, nil); err != nil {
+		log.Println("Error pinging MongoDB:", err)
+		if disconnectErr := client.Disconnect(context.Background()); disconnectErr != nil {
+			log.Println("Failed to close MongoDB client after ping failure:", disconnectErr)
+		}
 		return nil
 	}
-	err1 := client.Ping(ctx, nil)
-	if err1 != nil {
-		log.Println("Error in Pinging MongoDB",err1)
-		return nil
-	}
-	log.Println("Mongo DB connected successfully")
+
+	log.Println("MongoDB connected successfully")
 	return client
 }

@@ -16,7 +16,13 @@ type DBWorker struct {
 	MongoColl *mongo.Collection
 }
 
-func 	NewDBWorker(rdb *redis.Client, mongoColl *mongo.Collection) *DBWorker {
+type pendingMessage struct {
+	raw       string
+	doc       models.Message
+	persisted bool
+}
+
+func NewDBWorker(rdb *redis.Client, mongoColl *mongo.Collection) *DBWorker {
 	return &DBWorker{
 		RDB:       rdb,
 		MongoColl: mongoColl,
@@ -24,58 +30,105 @@ func 	NewDBWorker(rdb *redis.Client, mongoColl *mongo.Collection) *DBWorker {
 }
 
 func (w *DBWorker) Start() {
-	ctx:=context.Background()
+	ctx := context.Background()
 	log.Println("Starting DB Worker")
-	const Batchsize = 100
-	const flushInterval = 10 * time.Second
-	var buffer []interface{}
+	const batchSize = 100
+	const flushInterval = 4 * time.Second
+	const queueName = "chat_msgs"
+	const processingQueueName = "chat_msgs:processing"
+
+	// Messages already claimed when the process stopped were never acknowledged.
+	// Put them back before taking new work so they are retried instead of lost.
+	w.requeueProcessing(ctx, queueName, processingQueueName)
+
+	var buffer []pendingMessage
 	ticker := time.NewTicker(flushInterval)
+	poll := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
+	defer poll.Stop()
 	log.Println("DB Worker Started")
 	for {
 		select {
 		case <-ticker.C:
 			if len(buffer) > 0 {
 				log.Println("Timeout Reached 10 seconds flushing buffer to DB")
-				w.flush(ctx, &buffer)
+				w.flush(ctx, processingQueueName, &buffer)
 			}
-		default:
-			results, err := w.RDB.LPopCount(ctx, "chat_msgs", Batchsize-len(buffer)).Result()
-			if err == redis.Nil || len(results) == 0 {
-				time.Sleep(200 * time.Millisecond)
-				continue
-			} else if err != nil {
-				log.Println("Redis LPOP Error: ", err)
-				time.Sleep(2 * time.Second)
-				continue
-			}
-			for _, msgJSON := range results {
-				var msg models.Message
-				err := json.Unmarshal([]byte(msgJSON), &msg)
-				if err != nil {
-					log.Println("Failed to unmarshal message in worker ", err)
-					continue
-				}
-				buffer = append(buffer, msg)
-			}
-			if len(buffer) >= Batchsize {
+		case <-poll.C:
+			if len(buffer) >= batchSize {
 				log.Println("Buffer limit reached flushing to DB", len(buffer))
-				w.flush(ctx, &buffer)
-				ticker.Reset(flushInterval)
+				w.flush(ctx, processingQueueName, &buffer)
+				continue
 			}
+
+			msgJSON, err := w.RDB.LMove(ctx, queueName, processingQueueName, "RIGHT", "LEFT").Result()
+			if err == redis.Nil {
+				continue
+			}
+			if err != nil {
+				log.Println("Redis LMOVE error:", err)
+				continue
+			}
+
+			var msg models.Message
+			if err := json.Unmarshal([]byte(msgJSON), &msg); err != nil {
+				// Invalid data cannot be retried successfully; move it aside for inspection.
+				log.Println("Invalid message moved to dead-letter queue:", err)
+				if err := w.RDB.LMove(ctx, processingQueueName, "chat_msgs:dead_letter", "LEFT", "LEFT").Err(); err != nil {
+					log.Println("Failed to move invalid message to dead-letter queue:", err)
+				}
+				continue
+			}
+			buffer = append(buffer, pendingMessage{raw: msgJSON, doc: msg})
 		}
 	}
 }
 
-func (w *DBWorker) flush(ctx context.Context, buffer *[]interface{}) {
+func (w *DBWorker) requeueProcessing(ctx context.Context, queueName, processingQueueName string) {
+	for {
+		_, err := w.RDB.LMove(ctx, processingQueueName, queueName, "RIGHT", "LEFT").Result()
+		if err == redis.Nil {
+			return
+		}
+		if err != nil {
+			log.Println("Failed to recover processing queue:", err)
+			return
+		}
+	}
+}
+
+func (w *DBWorker) flush(ctx context.Context, processingQueueName string, buffer *[]pendingMessage) {
 	if len(*buffer) == 0 {
 		return
 	}
-	_, err := w.MongoColl.InsertMany(ctx, *buffer)
-	if err != nil {
-		log.Println("Failed to bulk write to MongoDB ", err)
-	} else {
-		log.Println("Successfully flushed logs to MongoDB ", len(*buffer))
+
+	if !(*buffer)[0].persisted {
+		docs := make([]interface{}, len(*buffer))
+		for i, message := range *buffer {
+			docs[i] = message.doc
+		}
+
+		writeCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		_, err := w.MongoColl.InsertMany(writeCtx, docs)
+		cancel()
+		if err != nil {
+			// Keep the claimed messages in the processing queue and in memory for retry.
+			log.Println("Failed to write batch to MongoDB; it will be retried:", err)
+			return
+		}
+		for i := range *buffer {
+			(*buffer)[i].persisted = true
+		}
 	}
-	*buffer = (*buffer)[:0]
+
+	for len(*buffer) > 0 {
+		message := (*buffer)[0]
+		if err := w.RDB.LRem(ctx, processingQueueName, 1, message.raw).Err(); err != nil {
+			// It is safer to retry a Mongo write than to discard a message that was not acknowledged.
+			log.Println("MongoDB write succeeded but Redis acknowledgement failed:", err)
+			return
+		}
+		*buffer = (*buffer)[1:]
+	}
+	log.Println("Successfully flushed logs to MongoDB")
 }

@@ -2,8 +2,10 @@ package middleware
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"net/http"
+
 	"github.com/coDing-Knight99/GoChat/auth"
 )
 
@@ -17,13 +19,21 @@ func VerifyToken(next http.HandlerFunc) http.HandlerFunc {
 		}
 		if tokenStr == "" {
 			log.Println("Unauthorized Access Token missing")
-			http.Error(w, "Unauthorized Access Token missing", http.StatusUnauthorized)
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(map[string]string{
+				"message":"Unauthorized",
+			})
+			// http.Error(w, "Unauthorized Access Token missing", http.StatusUnauthorized)
 			return
 		}
 		userID, err := auth.ValidateAccessToken(tokenStr)
 
 		if err != nil {
-			http.Error(w, "Unauthorized Access Token Expired or Invalid", http.StatusUnauthorized)
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(map[string]string{
+				"message":"Unauthorized",
+			})
+			// http.Error(w, "Unauthorized Access Token Expired or Invalid", http.StatusUnauthorized)
 			return
 		}
 

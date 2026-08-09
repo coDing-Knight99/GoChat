@@ -23,13 +23,13 @@ func main() {
 		log.Println("Mongo DB Connection Failed")
 		return
 	}
-	collection := client.Database("test").Collection("Message")
+	msgcollection := client.Database("test").Collection("Message")
 	userCollection := client.Database("test").Collection("Users")
 	var rdb *redis.Client
 	rdb = db.ConnectRedis()
 	h := models.NewHub(rdb)
 	go h.StartHub()
-	w := workers.NewDBWorker(rdb, collection)
+	w := workers.NewDBWorker(rdb, msgcollection)
 	go w.Start()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", middleware.VerifyToken(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -44,10 +44,23 @@ func main() {
 		log.Println("Login User")
 		controllers.Login(userCollection, w, r)
 	})
-	mux.HandleFunc("/checkavailable",func (w http.ResponseWriter,r *http.Request){
+	mux.HandleFunc("/checkavailable", func(w http.ResponseWriter, r *http.Request) {
 		log.Println("Username  availability check")
 		controllers.CheckUsernameAvailability(userCollection, w, r)
 	})
+	mux.HandleFunc("/conversations", middleware.VerifyToken(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log.Println("Fetching Conversations")
+		controllers.GetConversations(msgcollection, w, r)
+	})))
+	mux.HandleFunc("/messages", middleware.VerifyToken(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log.Println("Fetching Messages")
+		controllers.HandleGetMessagesMongo(msgcollection, w, r)
+	})))
+	mux.HandleFunc("/users/search", middleware.VerifyToken(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log.Println("Search User")
+		controllers.SearchUser(userCollection, w, r)
+	})))
+	mux.HandleFunc("/LoginStatus",controllers.CheckLogin)
 	err := http.ListenAndServe(os.Getenv("PORT"), middleware.EnableCORS(mux))
 	if err != nil {
 		log.Fatal("ListenAndServeError:", err)

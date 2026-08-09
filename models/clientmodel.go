@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 type Client struct { //struct for active users
@@ -26,6 +27,7 @@ func (c *Client) ReadPump(h *Hub) {
 			// break connection on unexpected error closely cleanly due to defer
 			break
 		}
+		msg.ID = bson.NewObjectID()
 		msg.SenderId = c.UserID
 		msg.Timestamp = time.Now()
 		h.Broadcast <- msg

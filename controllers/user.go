@@ -7,13 +7,45 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"regexp"
 
 	"github.com/coDing-Knight99/GoChat/auth"
 	"github.com/coDing-Knight99/GoChat/models"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"golang.org/x/crypto/bcrypt"
 )
+
+func CheckLogin(w http.ResponseWriter,r *http.Request){
+	w.Header().Set("Content-Type","application/json")
+	cookie,err := r.Cookie("accessToken")
+	var accessToken string
+	if err==nil {
+		accessToken = cookie.Value
+	}
+	if accessToken=="" {
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]bool{
+			"isLogin":false,
+		})
+		return
+	} 
+	_, err1 := auth.ValidateAccessToken(accessToken)
+
+	if err1!=nil {
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]bool{
+			"isLogin":false,
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]bool{
+		"isLogin":true,
+	})
+}
 
 func RegisterUser(userCollection *mongo.Collection, w http.ResponseWriter, r *http.Request) {
 	var user models.User
@@ -154,7 +186,7 @@ func Login(userCollection *mongo.Collection, w http.ResponseWriter, r *http.Requ
 }
 
 type queryusername struct {
-	Username string `json:"username"`
+	Username string `json:"username" bson:"userID"`
 }
 
 func CheckUsernameAvailability(userCollection *mongo.Collection, w http.ResponseWriter, r *http.Request) {
@@ -194,5 +226,60 @@ func CheckUsernameAvailability(userCollection *mongo.Collection, w http.Response
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{
 		"available": "false",
+	})
+}
+
+type searchusername struct {
+	Id       bson.ObjectID `json:"ID" bson:"_id"`
+	Username string        `json:"username" bson:"userID"`
+}
+
+func SearchUser(userCollection *mongo.Collection, w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	var q queryusername
+	err := json.NewDecoder(r.Body).Decode(&q)
+	if err != nil {
+		log.Println("Invalid Json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "Invalid Json",
+		})
+		return
+	}
+	safePrefix := regexp.QuoteMeta(q.Username)
+
+	filter := bson.M{
+		"userID": bson.Regex{
+			Pattern: "^" + safePrefix,
+			Options: "i", // case insensitive
+		},
+	}
+
+	findOpts := options.Find().SetLimit(10).SetProjection(bson.M{"_id": 1, "userID": 1})
+
+	cursor, err := userCollection.Find(r.Context(), filter, findOpts)
+
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "Internal Server Error",
+		})
+		return
+	}
+
+	defer cursor.Close(r.Context())
+
+	var users []searchusername
+	if err := cursor.All(r.Context(), &users); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "Internal Server Error",
+		})
+		return
+	}
+	log.Println(users)
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string][]searchusername{
+		"users": users,
 	})
 }
