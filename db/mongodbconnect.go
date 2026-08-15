@@ -12,6 +12,7 @@ import (
 
 func ConnectDB() *mongo.Client {
 	mongoURI := os.Getenv("MONGODB_URI")
+	log.Println("Running on Port", os.Getenv("PORT"))
 	if mongoURI == "" {
 		log.Println("Error: MONGODB_URI environment variable is not set")
 		return nil

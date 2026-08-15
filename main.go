@@ -3,7 +3,6 @@ package main
 import (
 	"log"
 	"net/http"
-	"os"
 
 	"github.com/coDing-Knight99/GoChat/controllers"
 	"github.com/coDing-Knight99/GoChat/db"
@@ -60,8 +59,9 @@ func main() {
 		log.Println("Search User")
 		controllers.SearchUser(userCollection, w, r)
 	})))
-	mux.HandleFunc("/LoginStatus",controllers.CheckLogin)
-	err := http.ListenAndServe(os.Getenv("PORT"), middleware.EnableCORS(mux))
+	mux.HandleFunc("/LoginStatus", controllers.CheckLogin)
+	err := http.ListenAndServe(":8080", middleware.EnableCORS(mux))
+
 	if err != nil {
 		log.Fatal("ListenAndServeError:", err)
 	}
