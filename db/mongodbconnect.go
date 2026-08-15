@@ -30,7 +30,7 @@ func ConnectDB() *mongo.Client {
 	}
 
 	// Create context for Ping
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 20	*time.Second)
 	defer cancel()
 
 	// Verify connection

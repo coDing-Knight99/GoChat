@@ -168,7 +168,7 @@ func Login(userCollection *mongo.Collection, w http.ResponseWriter, r *http.Requ
 		HttpOnly: true,
 		Secure:   os.Getenv("Environment") == "Production",
 		SameSite: sameSite,
-		MaxAge:   60 * 15,
+		MaxAge:   60 * 60,
 	})
 	http.SetCookie(w, &http.Cookie{
 		Name:     "refreshToken",
