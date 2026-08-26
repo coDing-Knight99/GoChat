@@ -60,7 +60,8 @@ func main() {
 		log.Println("Search User")
 		controllers.SearchUser(userCollection, w, r)
 	})))
-	mux.HandleFunc("/LoginStatus",controllers.CheckLogin)
+	mux.HandleFunc("/LoginStatus", controllers.CheckLogin)
+	mux.HandleFunc("/Logout", controllers.LogoutUser)
 	err := http.ListenAndServe(os.Getenv("PORT"), middleware.EnableCORS(mux))
 	if err != nil {
 		log.Fatal("ListenAndServeError:", err)

@@ -283,3 +283,31 @@ func SearchUser(userCollection *mongo.Collection, w http.ResponseWriter, r *http
 		"users": users,
 	})
 }
+
+func LogoutUser(w http.ResponseWriter,r *http.Request){
+	var sameSite http.SameSite
+	if os.Getenv("Environment") == "Development" {
+		sameSite = http.SameSiteLaxMode
+	} else {
+		sameSite = http.SameSiteNoneMode
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     "accessToken",
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   os.Getenv("Environment") == "Production",
+		SameSite: sameSite,
+		MaxAge:  -1,
+	})
+	http.SetCookie(w, &http.Cookie{
+		Name:     "refreshToken",
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   os.Getenv("Environment") == "Production",
+		SameSite: sameSite,
+		MaxAge:   60 * 60 * 24,
+	})
+	w.WriteHeader(http.StatusOK)
+}
