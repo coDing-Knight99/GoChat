@@ -3,6 +3,7 @@ package controllers
 import (
 	"log"
 	"net/http"
+	"os"
 
 	"github.com/coDing-Knight99/GoChat/middleware"
 	"github.com/coDing-Knight99/GoChat/models"
@@ -11,11 +12,12 @@ import (
 )
 
 var upgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool {
+        origin := r.Header.Get("Origin")
+        return origin == os.Getenv("FrontEnd_URL") // frontend origin
+    },
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
-	CheckOrigin: func(r *http.Request) bool {
-		return true
-	},
 }
 
 func HandleWebSocket(hub *models.Hub, w http.ResponseWriter, r *http.Request) {

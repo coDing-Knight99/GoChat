@@ -61,9 +61,12 @@ func main() {
 		controllers.SearchUser(userCollection, w, r)
 	})))
 	mux.HandleFunc("/LoginStatus", controllers.CheckLogin)
-	mux.HandleFunc("/Logout", controllers.LogoutUser)
+	mux.HandleFunc("/Logout", middleware.VerifyToken(http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){
+		log.Println("Logout User")
+		controllers.LogoutUser(w,r)
+	})))
 	err := http.ListenAndServe(os.Getenv("PORT"), middleware.EnableCORS(mux))
 	if err != nil {
-		log.Fatal("ListenAndServeError:", err)
+		log.Fatal("Error starting the server:", err)
 	}
 }
